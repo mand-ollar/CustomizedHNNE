@@ -1,0 +1,7 @@
+torch==2.2.2
+torchaudio==2.2.2
+numpy
+pandas
+transformers
+huggingface_hub
+hnne
