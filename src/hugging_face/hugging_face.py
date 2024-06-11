@@ -50,6 +50,13 @@ class HuggingFace:
         )
         self.model = self.model.to(self.device).eval()
 
+        msg = (
+            f"\nModel {self.model_name} loading is completed.\n",
+            f"- Sampling rate: {self.sampling_rate} Hz\n",
+            f"- Max length: {self.max_sec} sec\n",
+        )
+        print(*msg)
+
         return self.model
 
     def compute_embeddings(
@@ -87,6 +94,8 @@ class HuggingFace:
         )
 
         # Collect embeddings in the list
+        print(f"Computing embeddings with {self.model_name} on {self.device.type}.")
+
         embeddings = []
 
         with torch.no_grad():
