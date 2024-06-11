@@ -2,6 +2,7 @@
 
 # Internal
 import platform
+from pathlib import Path
 from typing import Literal
 
 # External
@@ -39,6 +40,8 @@ class HuggingFace:
 
     def _load_model(self) -> nn.Module:
         """Combine feature extractor and model from Hugging Face as a nn.Module."""
+
+        Path("./model").mkdir(parents=True, exist_ok=True)
 
         self.model = AutoModel.from_pretrained(
             pretrained_model_name_or_path=self.model_name,

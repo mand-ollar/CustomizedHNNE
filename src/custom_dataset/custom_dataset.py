@@ -32,6 +32,8 @@ class CustomDataset(Dataset):
 
         data_path = Path(data_path)
 
+        Path("./model").mkdir(parents=True, exist_ok=True)
+
         self.feature_extractor = AutoFeatureExtractor.from_pretrained(
             pretrained_model_name_or_path=model_name,
             cache_dir="./model",
