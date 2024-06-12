@@ -44,7 +44,7 @@ class HNNEClustering:
     def cluster_it(
         self,
         embeddings: np.array,
-    ):
+    ) -> pd.DataFrame:
         """Cluster embeddings with HNNE."""
 
         # {self.dim} dimensional embeddings
@@ -78,6 +78,12 @@ class HNNEClustering:
         )
         self.df = pd.concat(objs=[self.df, projection_df], axis=1)
 
+        # Append embeddings to self.df
+        embeddings_df = pd.DataFrame(
+            data={"Embeddings": embeddings.tolist()},
+        )
+        self.df = pd.concat(objs=[self.df, embeddings_df], axis=1)
+
         # Save pd.DataFrame
         Path("./data/results/clustered").mkdir(parents=True, exist_ok=True)
 
@@ -90,3 +96,5 @@ class HNNEClustering:
             orient="records",
             indent=2,
         )
+
+        return self.df
