@@ -35,6 +35,6 @@ def make_csv(
 
 if __name__ == "__main__":
     make_csv(
-        data_path="/data/minseok/data_share/AggressiveYell/AggressiveYell_16K",
-        save_path="./data/csv/AggressiveYell.csv",
+        data_path="/data/datasets/AngryMedia/Female",
+        save_path="./data/csv/AngryMedia_female.csv",
     )

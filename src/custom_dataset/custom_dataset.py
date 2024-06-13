@@ -60,9 +60,10 @@ class CustomDataset(Dataset):
         self.max_sec = max_sec
         self.sr = sr
 
-        print("\n-- Label Mappings:")
+        print("\n>>> Label Mappings:")
         print(
-            *[f" - {i:02} {label}" for label, i in self.label_to_idx.items()], sep="\n"
+            *[f"    - {i:02} {label}" for label, i in self.label_to_idx.items()],
+            sep="\n",
         )
         print()
 
