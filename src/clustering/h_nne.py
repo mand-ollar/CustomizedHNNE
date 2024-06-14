@@ -241,5 +241,46 @@ class HNNEClustering:
                 )
             print("\n")
 
-    def confidence_cluster_by_cluster(self, model_name: str) -> None:
+    def confidence_cluster_by_cluster(
+        self,
+        model_name: str,
+        hugging_face_module: object,
+        project_name: str,
+    ) -> None:
         """Calculate confidence of each cluster by model."""
+        hugging_face = hugging_face_module
+
+        print(
+            ">>> Computing confidence values and appending the values to the folders name."
+        )
+
+        hugging_face.load_model_for_confidence(model_name=model_name)
+
+        mean_confidence_list = []
+        std_confidence_list = []
+
+        for cluster_folder in self.cluster_folder_list:
+            confidence = hugging_face.compute_confidence(
+                model_name=model_name,
+                data_path=cluster_folder,
+                project_name=project_name,
+            )
+
+            mean_confidence = confidence.mean().item()
+            std_confidence = confidence.std().item()
+            mean_confidence_list.append(mean_confidence)
+            std_confidence_list.append(std_confidence)
+
+            # Change folder name
+            cluster_folder.rename(
+                cluster_folder.parent
+                / f"{cluster_folder.name}_m{mean_confidence:.2f}_s{std_confidence:.2f}"
+            )
+
+        for cluster_folder, mean_confidence, std_confidence in zip(
+            self.cluster_folder_list, mean_confidence_list, std_confidence_list
+        ):
+            print(
+                f"    - {cluster_folder.name}: {mean_confidence:.4f} ± {std_confidence:.4f}"
+            )
+        print()

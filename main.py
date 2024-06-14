@@ -8,10 +8,12 @@ st = time.time()
 # pylint: disable=wrong-import-position
 
 # Internal
+import warnings
 from pathlib import Path
 
 # External
 import numpy as np
+from tqdm import tqdm
 
 # Project
 # pylint: disable=unused-import
@@ -22,6 +24,21 @@ from src.visualize import spotlight
 
 # pylint: enable=unused-import
 # pylint: enable=wrong-import-position
+
+############################## PREPARATION ##############################
+# Not showing warnings
+warnings.filterwarnings("ignore")
+
+
+# Not leaving from tqdm progress bar
+def _new_init(self, *args, **kwargs):
+    kwargs.setdefault("leave", False)
+    _original_init(self, *args, **kwargs)
+
+
+_original_init = tqdm.__init__
+tqdm.__init__ = _new_init
+##########################################################################
 
 print(">>> Modules imported.")
 print(f">>> {time.time() - st:.2f} seconds elapsed for module imports.")
@@ -38,8 +55,9 @@ MODEL_LIST = [
 ]
 MODEL_NAME = MODEL_LIST[2]
 CSV_FILE = "./data/csv/AngryMedia_female.csv"
+PROJECT_NAME = "AngryMedia_gender_classification"
 
-###################################################################################################
+##########################################################################
 
 # TOOLS
 hugging_face = HuggingFace(
@@ -60,9 +78,14 @@ np.save(file=f"./data/results/{Path(CSV_FILE).stem}_embed.npy", arr=emb)
 HN = h_nne.HNNEClustering(csv_path=CSV_FILE)
 HN.cluster_it(embeddings=emb)
 HN.save_it(
-    project_name="AngryMedia_gender_classification",
+    project_name=PROJECT_NAME,
     hierarchically=True,
     clean_directory=True,
+)
+HN.confidence_cluster_by_cluster(
+    model_name=MODEL_LIST[2],
+    hugging_face_module=hugging_face,
+    project_name=PROJECT_NAME,
 )
 
 # SV = spotlight.SpotlightVisual(df=df)

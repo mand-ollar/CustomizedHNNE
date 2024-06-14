@@ -65,7 +65,6 @@ class CustomDataset(Dataset):
             *[f"    - {i:02} {label}" for label, i in self.label_to_idx.items()],
             sep="\n",
         )
-        print()
 
     def __len__(self) -> int:
         return self.labels.shape[0]

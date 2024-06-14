@@ -9,7 +9,7 @@ from typing import Literal
 from tqdm import tqdm
 
 # Hugging Face
-from transformers import AutoModel
+from transformers import AutoModel, AutoModelForAudioClassification
 
 # Torch
 import torch
@@ -47,6 +47,7 @@ class HuggingFace:
     def _load_model(
         self,
         model_name: str,
+        mode: Literal["confidence", "embedding"] = "embedding",
     ) -> nn.Module:
         """Combine feature extractor and model from Hugging Face as a nn.Module."""
 
@@ -54,12 +55,22 @@ class HuggingFace:
 
         print(f">>> Loading model {self.model_name} from Hugging Face...")
 
-        model = AutoModel.from_pretrained(
-            pretrained_model_name_or_path=model_name,
-            cache_dir="./model",
-            force_download=True,
-        )
-        model = self.model.to(self.device).eval()
+        if mode == "embedding":
+            model = AutoModel.from_pretrained(
+                pretrained_model_name_or_path=model_name,
+                cache_dir="./model",
+                force_download=True,
+            )
+        elif mode == "confidence":
+            model = AutoModelForAudioClassification.from_pretrained(
+                pretrained_model_name_or_path=model_name,
+                cache_dir="./model",
+                force_download=True,
+            )
+        else:
+            raise NotImplementedError(f"Mode {mode} is not supported.")
+
+        model = model.to(self.device).eval()
 
         if model_name == self.model_name:
             self.model = model
@@ -150,6 +161,17 @@ class HuggingFace:
 
         return embeddings
 
+    def load_model_for_confidence(
+        self,
+        model_name: str,
+    ):
+        """Load model for confidence computation."""
+
+        self.model = self._load_model(
+            model_name=model_name,
+            mode="confidence",
+        )
+
     def compute_confidence(
         self,
         model_name: str,
@@ -158,18 +180,13 @@ class HuggingFace:
     ):
         """Compute confidence from the inference result."""
 
-        if self.model_name == model_name and self.model is not None:
-            model = self.model
-        elif self.model_name != model_name:
-            model = self._load_model(model_name=model_name)
-
         # Make it as csv
         csv_save_path = Path("./.cache")
         csv_save_path.mkdir(parents=True, exist_ok=True)
         make_csv(data_path=data_path, save_path=csv_save_path / f"{project_name}.csv")
 
         # Dataset & DataLoader
-        print(">>> Setting up DataLoader...")
+        print(">>> Setting up DataLoader...", end="")
         dataset = CustomDataset(
             data_path=csv_save_path / f"{project_name}.csv",
             model_name=model_name,
@@ -185,6 +202,10 @@ class HuggingFace:
         print(">>> DataLoader is ready.")
         print()
 
+        # Collect confidences in the list
+        print(
+            f">>> Computing confidences with {self.model_name} on {self.device.type}."
+        )
         confidences = []
 
         with torch.no_grad():
@@ -199,5 +220,11 @@ class HuggingFace:
                 confidence = self.inference_result.logits.detach().cpu()
                 confidences.append(confidence)
 
+        print(confidences)
         # Concatenate confidences from the list of tensors
-        confidences = torch.cat(confidences, dim=0)
+        confidences = (
+            torch.cat(confidences, dim=0) if len(confidences) > 0 else confidences
+        )
+        print(">>> Confidence computation is completed.")
+
+        return confidences
