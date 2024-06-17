@@ -8,6 +8,11 @@ def style_it(
 ):
     """Colorize the text."""
 
+    if color is None:
+        color = "default"
+    if style is None:
+        style = "default"
+
     color_table = {
         "green": "\033[32m",
         "red": "\033[31m",

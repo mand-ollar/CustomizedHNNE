@@ -14,13 +14,6 @@ from hnne import HNNE
 from utils.style import style_it
 
 
-def _get_folder_size(folder: Path) -> int:
-    """Get the size of a folder in bytes."""
-    assert folder.is_dir(), "Please provide a valid folder."
-
-    return sum(f.stat().st_size for f in folder.glob("**/*") if f.is_file())
-
-
 def _get_file_size_sum(files: pd.Series) -> int:
     """Get the size of a list of files in bytes."""
     return int(sum(Path(file).stat().st_size for file in files) / 1024 / 1024)
@@ -32,6 +25,7 @@ class HNNEClustering:
     def __init__(
         self,
         csv_path: str = None,
+        project_name: str = None,
         dim: int = 2,
         metric: Literal[
             "cosine", "euclidean", "cityblock", "l1", "l2", "manhattan"
@@ -64,9 +58,21 @@ class HNNEClustering:
         with open(file=csv_path, mode="r", encoding="ascii") as file:
             self.df = pd.read_csv(filepath_or_buffer=file)
 
+        cols = self.df.columns
+        wav_col = None
+        for col in cols:
+            if "wav" in col.lower():
+                wav_col = col
+                break
+        if wav_col is None:
+            raise ValueError("Please provide a column with wav file paths.")
+
         # Define attributes beforehand
+        self.wav_col = wav_col
+        self.project_name = project_name
         self.partition_levels = None
         self.cluster_folder_list = []
+        self.original_df = self.df.copy()
 
     def cluster_it(
         self,
@@ -136,22 +142,13 @@ class HNNEClustering:
 
     def save_it(
         self,
-        project_name: str,
         hierarchically: bool = True,
         clean_directory: bool = False,
     ) -> None:
         """Save audio files with their corresponding clusters."""
 
         # Calculate the size of data before saving it in the hard drive
-        cols = self.df.columns
-        wav_col = None
-        for col in cols:
-            if "wav" in col.lower():
-                wav_col = col
-                break
-        if wav_col is None:
-            raise ValueError("Please provide a column with wav file paths.")
-
+        wav_col = self.wav_col
         size_in_meg_bytes = _get_file_size_sum(files=self.df[wav_col])
 
         # Setting folder paths
@@ -166,7 +163,7 @@ class HNNEClustering:
                 f">>> Total data size is {size_in_meg_bytes} MB. Saving in Hard drive."
             )
 
-        save_folder = base_folder / project_name
+        save_folder = base_folder / self.project_name
         save_folder.mkdir(parents=True, exist_ok=True)
         print(f">>> Saving in {save_folder}.")
         print()
@@ -211,11 +208,16 @@ class HNNEClustering:
                 shutil.copy(
                     src=self.df["wav"][i], dst=save_cluster_folder / src_wav.name
                 )
+
+                progress = f"[{i+1}/{len(cluster)}]"
                 print(
-                    f"\r>>> {i+1}/{len(cluster)}: {src_wav.name} -> {save_cluster_folder}",
+                    f"\r>>> {style_it(color='green', style='bold', text=progress)} "
+                    f"{src_wav.name} -> {save_cluster_folder}",
                     end="",
                 )
-            print("\n")
+
+            print("\n>>> Saving complete.")
+            print()
 
         else:
             print(
@@ -229,58 +231,199 @@ class HNNEClustering:
             for i, j in enumerate(cluster):
                 save_cluster_folder = save_folder / str(j)
                 save_cluster_folder.mkdir(parents=True, exist_ok=True)
+                self.cluster_folder_list.append(save_cluster_folder)
 
                 # Copy audio files from the original files
                 src_wav = Path(self.df["wav"][i])
                 shutil.copy(
                     src=self.df["wav"][i], dst=save_cluster_folder / src_wav.name
                 )
+
+                progress = f"[{i+1}/{len(cluster)}]"
                 print(
-                    f"\r>>> {i+1}/{len(cluster)}: {src_wav.name} -> {save_cluster_folder}",
+                    f"\r>>> {style_it(color='green', style='bold', text=progress)} "
+                    f"{src_wav.name} -> {save_cluster_folder}",
                     end="",
                 )
-            print("\n")
+
+            print("\n>>> Saving complete.")
+            print()
+
+        self.cluster_folder_list = list(set(self.cluster_folder_list))
 
     def confidence_cluster_by_cluster(
         self,
         model_name: str,
-        hugging_face_module: object,
-        project_name: str,
+        hugging_face: object,
+        csv_path: str,
+        with_logits: str,
+        orientation: Literal["max", "min"] = "max",
+        check_percentile: int = 30,
     ) -> None:
         """Calculate confidence of each cluster by model."""
-        hugging_face = hugging_face_module
 
-        print(
-            ">>> Computing confidence values and appending the values to the folders name."
+        # Compute confidences
+        if (
+            model_name == hugging_face.model_name
+            and hugging_face.inference_result is not None
+        ):
+            print(
+                f">>> Results from model {model_name} is already loaded.\n"
+                ">>> Using the precomputed results."
+            )
+            print()
+
+            confidences = hugging_face.inference_result.logits.detach().cpu()
+
+        else:
+            print(">>> Computing the confidence values...")
+            print()
+
+            hugging_face.load_model_for_confidence(model_name=model_name)
+
+            confidences = hugging_face.compute_confidence(
+                model_name=model_name,
+                csv_path=csv_path,
+            )
+
+        confidences = with_logits(confidences=confidences)
+        print(">>> Computing complete.")
+        print()
+
+        # Append it to the DataFrame
+        print(">>> Modifying folder names with confidence values.")
+
+        self.df["Confidences"] = confidences.tolist()
+
+        self.cluster_folder_list = sorted(
+            self.cluster_folder_list,
+            key=lambda x: int(x.stem),
         )
-
-        hugging_face.load_model_for_confidence(model_name=model_name)
 
         mean_confidence_list = []
         std_confidence_list = []
+        new_cluster_folder_list = []
 
         for cluster_folder in self.cluster_folder_list:
-            confidence = hugging_face.compute_confidence(
-                model_name=model_name,
-                data_path=cluster_folder,
-                project_name=project_name,
-            )
+            cluster_no = int(cluster_folder.stem)
+            cluster_df = self.df.loc[self.df["Cluster_0"] == cluster_no]
+            cluster_confidences = cluster_df["Confidences"][:]
 
-            mean_confidence = confidence.mean().item()
-            std_confidence = confidence.std().item()
+            # Mean and std value across batch
+            mean_confidence = cluster_confidences.mean(axis=0)
+            std_confidence = cluster_confidences.std(axis=0)
             mean_confidence_list.append(mean_confidence)
             std_confidence_list.append(std_confidence)
 
             # Change folder name
-            cluster_folder.rename(
+            new_folder_name = (
                 cluster_folder.parent
                 / f"{cluster_folder.name}_m{mean_confidence:.2f}_s{std_confidence:.2f}"
             )
+            cluster_folder.rename(new_folder_name)
+            new_cluster_folder_list.append(new_folder_name)
 
-        for cluster_folder, mean_confidence, std_confidence in zip(
-            self.cluster_folder_list, mean_confidence_list, std_confidence_list
-        ):
-            print(
-                f"    - {cluster_folder.name}: {mean_confidence:.4f} ± {std_confidence:.4f}"
+        print(">>> Modification complete.")
+        print()
+
+        print(">>> Confidence values:")
+
+        for i, cluster_folder in enumerate(new_cluster_folder_list):
+            check_folder = (
+                Path("./data/results/clustered_audio") / self.project_name / "check"
             )
+            check_folder.mkdir(parents=True, exist_ok=True)
+
+            text = (
+                f"    - {cluster_folder.name}\t> "
+                f"{str(cluster_folder.relative_to(Path('./data/results/clustered_audio')))}"
+            )
+
+            if orientation == "max":
+                mean_confidence_np = np.array(mean_confidence_list)
+                threshold = np.percentile(mean_confidence_np, check_percentile)
+
+                if mean_confidence_list[i] < threshold:
+                    color = "red"
+                    style = "bold"
+
+                    shutil.copytree(
+                        src=cluster_folder, dst=check_folder / cluster_folder.name
+                    )
+
+                else:
+                    color = style = None
+
+            elif orientation == "min":
+                mean_confidence_np = np.array(mean_confidence_list)
+                threshold = np.percentile(mean_confidence_np, 100 - check_percentile)
+
+                if mean_confidence_list[i] > threshold:
+                    color = "red"
+                    style = "bold"
+
+                    shutil.copytree(
+                        src=cluster_folder, dst=check_folder / cluster_folder.name
+                    )
+
+                else:
+                    color = style = None
+
+            else:
+                raise ValueError("Please provide a valid orientation.")
+
+            print(style_it(color=color, style=style, text=text))
+        print()
+
+    def remove_outliers(self) -> None:
+        """Remove outliers from the check folder."""
+        check_folder = (
+            Path("./data/results/clustered_audio") / self.project_name / "check"
+        )
+
+        # Go remove normal files
+        print(
+            ">>> Check folder is created "
+            f"> {style_it(color='red', style='bold', text=check_folder)}\n"
+            ">>> Please check the folder for the clusters and remove the ones "
+            "you do not want to reject."
+        )
+        print()
+
+        print(
+            f">>> Press {style_it(color='green', style='bold', text='Enter')} "
+            "to continue when you are done."
+        )
+        input()
+
+        # Make as csv file with rejection aimed files
+        print(">>> Rejecting files will be listed in csv file.")
+
+        wav_files = list(check_folder.rglob("*.wav"))
+        df = self.original_df.copy()
+        df["wav_name"] = df[self.wav_col].apply(lambda x: Path(x).name)
+
+        new_df_list = []
+        for wav_file in wav_files:
+
+            new_df_list.append(df.loc[df["wav_name"] == wav_file.name])
+
+        new_df = pd.concat(objs=new_df_list, axis=0)
+        new_df.drop(columns=["wav_name"], inplace=True)
+
+        saved_folder = str(
+            Path("./data/results/clustered_audio/")
+            / self.project_name
+            / f"{self.csv_name}_rejected.csv"
+        )
+
+        new_df.to_csv(
+            path_or_buf=saved_folder,
+            index=False,
+        )
+
+        print(
+            ">>> Rejected files are saved in "
+            f"{style_it(color='red', style='bold', text=saved_folder)}."
+        )
         print()

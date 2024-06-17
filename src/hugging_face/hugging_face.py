@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 
 # Project
 from src.custom_dataset import CustomDataset
-from utils.make_csv import make_csv
+from utils.style import style_it
 
 
 class HuggingFace:
@@ -29,11 +29,24 @@ class HuggingFace:
         model_name: str,
         sampling_rate: int = 16000,
         max_sec: int = None,
+        batch_size: int = 1,
+        num_proc: int = 0,
     ):
         # Related to model
         self.model = None
         self.model_name = model_name
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.batch_size = batch_size
+        self.num_proc = num_proc
+
+        # Set number of processors for Mac, Linux
+        if platform.system() == "Darwin":
+            print(">>> Running on MacOS. Setting num_proc=0.")
+            num_proc = 0
+        elif platform.system() == "Linux":
+            print(f">>> Running on Linux. Setting num_proc={num_proc}.")
+        else:
+            raise NotImplementedError(f"Platform {platform.system()} is not supported.")
 
         # Related to audio
         self.sampling_rate = sampling_rate
@@ -41,8 +54,6 @@ class HuggingFace:
 
         # Define self attrtibute beforehand
         self.inference_result = None
-        self.num_proc = None
-        self.batch_size = None
 
     def _load_model(
         self,
@@ -53,7 +64,7 @@ class HuggingFace:
 
         Path("./model").mkdir(parents=True, exist_ok=True)
 
-        print(f">>> Loading model {self.model_name} from Hugging Face...")
+        print(">>> Loading model from Hugging Face...")
 
         if mode == "embedding":
             model = AutoModel.from_pretrained(
@@ -76,7 +87,8 @@ class HuggingFace:
             self.model = model
 
         print(
-            f"\n>>> Model {model_name} loading is completed.\n"
+            f">>> Model {style_it(color='red', style='bold', text=model_name)} "
+            "loading is completed.\n"
             f"    - Sampling rate: {self.sampling_rate} Hz\n"
             f"    - Max length: {self.max_sec} sec\n",
         )
@@ -85,25 +97,10 @@ class HuggingFace:
 
     def compute_embeddings(
         self,
-        data_path: str,
-        batch_size: int = 1,
-        num_proc: int = 0,
+        csv_path: str,
         output_type: Literal["numpy", "torch"] = "torch",
     ) -> torch.tensor:
         """Compute embeddings with self.model."""
-
-        # Set number of processors for Mac, Linux
-        if platform.system() == "Darwin":
-            print(">>> Running on MacOS. Setting num_proc=0.")
-            num_proc = 0
-        elif platform.system() == "Linux":
-            print(f">>> Running on Linux. Setting num_proc={num_proc}.")
-        else:
-            raise NotImplementedError(f"Platform {platform.system()} is not supported.")
-
-        # Num Proc and Batch Size as attributes
-        self.num_proc = num_proc
-        self.batch_size = batch_size
 
         # Load Hugging Face model
         self._load_model(self.model_name)
@@ -111,15 +108,15 @@ class HuggingFace:
         # Dataset & DataLoader
         print(">>> Setting up DataLoader...")
         dataset = CustomDataset(
-            data_path=data_path,
+            data_path=csv_path,
             model_name=self.model_name,
             sr=self.sampling_rate,
             max_sec=self.max_sec,
         )
         dataloader = DataLoader(
             dataset=dataset,
-            batch_size=batch_size,
-            num_workers=num_proc,
+            batch_size=self.batch_size,
+            num_workers=self.num_proc,
             shuffle=False,
         )
         print(">>> DataLoader is ready.")
@@ -175,23 +172,22 @@ class HuggingFace:
     def compute_confidence(
         self,
         model_name: str,
-        data_path: str,
-        project_name: str,
+        csv_path: str,
     ):
         """Compute confidence from the inference result."""
 
-        # Make it as csv
-        csv_save_path = Path("./.cache")
-        csv_save_path.mkdir(parents=True, exist_ok=True)
-        make_csv(data_path=data_path, save_path=csv_save_path / f"{project_name}.csv")
+        # # Make it as csv
+        # csv_save_path = Path("./.cache")
+        # csv_save_path.mkdir(parents=True, exist_ok=True)
+        # make_csv(data_path=data_path, save_path=csv_save_path / f"{project_name}.csv")
 
         # Dataset & DataLoader
-        print(">>> Setting up DataLoader...", end="")
         dataset = CustomDataset(
-            data_path=csv_save_path / f"{project_name}.csv",
+            data_path=csv_path,
             model_name=model_name,
             sr=self.sampling_rate,
             max_sec=self.max_sec,
+            print_label_mappings=False,
         )
         dataloader = DataLoader(
             dataset=dataset,
@@ -199,13 +195,7 @@ class HuggingFace:
             num_workers=self.num_proc,
             shuffle=False,
         )
-        print(">>> DataLoader is ready.")
-        print()
 
-        # Collect confidences in the list
-        print(
-            f">>> Computing confidences with {self.model_name} on {self.device.type}."
-        )
         confidences = []
 
         with torch.no_grad():
@@ -220,11 +210,7 @@ class HuggingFace:
                 confidence = self.inference_result.logits.detach().cpu()
                 confidences.append(confidence)
 
-        print(confidences)
         # Concatenate confidences from the list of tensors
-        confidences = (
-            torch.cat(confidences, dim=0) if len(confidences) > 0 else confidences
-        )
-        print(">>> Confidence computation is completed.")
+        confidences = torch.cat(confidences, dim=0)
 
         return confidences

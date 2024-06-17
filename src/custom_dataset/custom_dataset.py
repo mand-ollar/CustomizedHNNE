@@ -27,6 +27,7 @@ class CustomDataset(Dataset):
         model_name: str,
         max_sec: int = None,
         sr: int = 16000,
+        print_label_mappings: bool = True,
     ):
         super().__init__()
 
@@ -60,11 +61,12 @@ class CustomDataset(Dataset):
         self.max_sec = max_sec
         self.sr = sr
 
-        print("\n>>> Label Mappings:")
-        print(
-            *[f"    - {i:02} {label}" for label, i in self.label_to_idx.items()],
-            sep="\n",
-        )
+        if print_label_mappings:
+            print("\n>>> Label Mappings:")
+            print(
+                *[f"    - {i:02} {label}" for label, i in self.label_to_idx.items()],
+                sep="\n",
+            )
 
     def __len__(self) -> int:
         return self.labels.shape[0]
